@@ -1,7 +1,8 @@
 from flask import Flask, request, render_template, redirect, flash, session
 from mysqlconn import connectToMySQL
 from flask_bcrypt import Bcrypt
-import re    
+import re
+from datetime import datetime, timedelta  
 app = Flask(__name__)
 app.secret_key = "FriedRice"
 bcrypt = Bcrypt(app)
@@ -111,31 +112,41 @@ def landing():
     else:
         return redirect("/")
 
-    mysql = connectToMYSQL("dojo_tweets")
-    query = "SELECT tweets.tweet_id, tweets.message, tweets.created_at, users.first_name, users.last_name FROM tweets JOIN users ON tweets.author = users.user_id"
+    mysql = connectToMySQL("dojo_tweets")
+    query = "SELECT tweets.author, tweets.tweet_id, tweets.message, tweets.created_at, users.first_name, users.last_name FROM tweets JOIN users ON tweets.author = users.user_id"
     tweets = mysql.query_db(query)
 
-    mysql = connectToMYSQL("dojo_tweets")
+    mysql = connectToMySQL("dojo_tweets")
     query = "SELECT tweet_like FROM users_likes WHERE user_like = %(user_id)s"
     data = {
         'user_id': session['user_id']
     }
     liked_tweets = [ tweet['tweet_like'] for tweet in mysql.query_db(query, data) ] #for loop that creates a list of all the liked tweets, also known as list comprehension 
 
+    mysql = connectToMySQL("dojo_tweets")
+    query = "SELECT tweet_like, COUNT(tweet_like) as like_count FROM users_likes GROUP BY tweet_like"
+    like_count = mysql.query_db(query)
 
     for tweet in tweets:
         td = datetime.now() - tweet['created_at']
-        if td.seconds = 0:
+
+        if td.seconds == 0:
             tweet['time_since_secs'] = 1
         if td.seconds < 60 and td.seconds > 0:
             tweet['time_since_secs'] = td.seconds
         if td.seconds < 3600:
-            tweet['time_since_minutes'] = rount(td.seconds / 60)
+            tweet['time_since_minutes'] = round(td.seconds / 60)
         if td.seconds > 3600:
             tweet['time_since_hours'] = round(td.seconds / 3600)
         if td.days > 0:
             tweet['time_since_days'] = td.days
     
+        for like in like_count:
+            if like['tweet_like'] == tweet['tweet_id']:
+                tweet['like_count'] = like['like_count']
+
+        if 'like_count' not in tweet:
+            tweet['like_count'] = 0
 
     return render_template("landing.html", user = user_data, tweets=tweets, liked_tweets=liked_tweets)
 
@@ -145,17 +156,17 @@ def save_tweet_to_db():
         return redirect("/")
 
     is_valid = True
-    if len(request.form(['tweet_content'])) < 5:
+    if len(request.form['tweet_content']) < 5:
         is_valid = False
         flash("Tweets must be at least 5 characters long.")
 
     if not is_valid:
-        return redirect("/success")
+        return redirect("/")
 
     mysql = connectToMySQL('dojo_tweets')
     query = "INSERT INTO tweets (message, author, created_at, updated_at) VALUES (%(m)s, %(a)s, NOW(), NOW())"
     data = {
-        'm': request.form['tweet_content']
+        'm': request.form["tweet_content"],
         'a': session['user_id']
     }
     mysql.query_db(query, data)
@@ -163,8 +174,7 @@ def save_tweet_to_db():
 
 @app.route("/tweet_detail/<t_id>")
 def tweet_detail(t_id):
-
-    connectToMYSQL('dojo_tweets')
+    mysql = connectToMySQL("dojo_tweets")
     query = "SELECT tweet_id, tweets.message, tweets.created_at, users.first_name, users.last_name FROM tweets JOIN users ON tweets.author = users.user_id WHERE tweet_id = %(t_id)s"
     data = {'t_id': t_id}
     tweet_data = mysql.query_db(query, data)
@@ -184,11 +194,22 @@ def on_like(tweet_id):
 
 @app.route("/unlike_tweet/<tweet_id>")
 def on_unlike(tweet_id):
-    mysql = connectToMYSQL("dojo_tweets")
+    mysql = connectToMySQL("dojo_tweets")
     query = "DELETE FROM users_likes WHERE user_like = %(user_id)s AND tweet_like = %(tweet_id)s"
     data = {
         'user_id': session['user_id'],
         'tweet_id': tweet_id 
+    }
+    mysql.query_db(query, data)
+    return redirect("/success")
+
+@app.route("/delete_tweet/<tweet_id>")
+def on_delete(tweet_id):
+    mysql = connectToMySQL("dojo_tweets")
+    query = "DELETE FROM tweets WHERE tweet_id = %(t_id)s AND author = %(u_id)s"
+    data = {
+        't_id': tweet_id,
+        'u_id':session['user_id']
     }
     mysql.query_db(query, data)
     return redirect("/success")
